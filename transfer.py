@@ -60,7 +60,6 @@ def get_spotify_tracks(playlist_url):
 
     return tracks
 
-
 # --- SEARCH YT MUSIC & MATCH BEST RESULT ---
 
 def find_best_yt_song(track):
@@ -116,58 +115,60 @@ def parse_duration(duration_str):
     parts = duration_str.strip().split(':')
     return int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else int(parts[0])
 
-# --- MIGRATION PROCESS ---
+# --- MIGRATION PROCESS (ONE BY ONE) ---
 
-def add_tracks_in_batches(ytmusic, playlist_id, video_ids, batch_size=100, delay=3):
-    for i in range(0, len(video_ids), batch_size):
-        batch = video_ids[i:i+batch_size]
-        response = ytmusic.add_playlist_items(playlist_id, batch)
-        print(f"Added batch {i//batch_size + 1}: {len(batch)} tracks, response: {response}")
-        time.sleep(delay)  # Increased delay between batches
+def search_and_match_ytm_track(track):
+    best_match = find_best_yt_song(track)
+    if best_match:
+        return best_match['videoId'], "strict"
+    else:
+        best_match = find_best_yt_song_relaxed(track)
+        if best_match:
+            return best_match['videoId'], "relaxed"
+    return None, None
+
+def process_and_add_one_by_one(ytmusic, playlist_id, spotify_tracks, delay=1):
+    total_added = 0
+    failed_tracks = []
+    for idx, track in enumerate(spotify_tracks):
+        video_id, match_type = search_and_match_ytm_track(track)
+        if video_id:
+            try:
+                response = ytmusic.add_playlist_items(playlist_id, [video_id])
+                if response.get('status') == 'STATUS_SUCCEEDED':
+                    if match_type == "strict":
+                        print(f"[{idx+1}/{len(spotify_tracks)}] ✅ Added: {track['name']} -> {video_id}")
+                    else:
+                        print(f"[{idx+1}/{len(spotify_tracks)}] 🟡 Relaxed match: {track['name']} -> {video_id}")
+                    total_added += 1
+                else:
+                    print(f"[{idx+1}/{len(spotify_tracks)}] ❌ Failed to add: {track['name']} -> {video_id}")
+                    failed_tracks.append(track)
+            except Exception as e:
+                print(f"[{idx+1}/{len(spotify_tracks)}] ❌ Exception for: {track['name']} -> {video_id} | {e}")
+                failed_tracks.append(track)
+        else:
+            print(f"[{idx+1}/{len(spotify_tracks)}] ❌ No match for: {track['name']} - {', '.join(track['artists'])}")
+            failed_tracks.append(track)
+        time.sleep(delay)
+    return total_added, failed_tracks
 
 def transfer_playlist():
     spotify_tracks = get_spotify_tracks(SPOTIFY_PLAYLIST_URL)
     print(f"Found {len(spotify_tracks)} tracks in Spotify playlist.")
 
     playlist_id = ytmusic.create_playlist(YTM_PLAYLIST_NAME, YTM_PLAYLIST_DESC)
-    matched_video_ids = []
-    failed_tracks = []
+    delay = 1
 
-    for i, track in enumerate(spotify_tracks):
-        best_match = find_best_yt_song(track)
-        if best_match:
-            print(f"[{i+1}/{len(spotify_tracks)}] ✅ Matched: {track['name']} -> {best_match['title']}")
-            matched_video_ids.append(best_match['videoId'])
-        else:
-            print(f"[{i+1}/{len(spotify_tracks)}] ❌ No accurate match found for: {track['name']} - {', '.join(track['artists'])}")
-            failed_tracks.append((i, track))
+    total_added, failed_tracks = process_and_add_one_by_one(ytmusic, playlist_id, spotify_tracks, delay)
 
-    if matched_video_ids:
-        add_tracks_in_batches(ytmusic, playlist_id, matched_video_ids)
-        print(f"\n✅ Transfer complete. {len(matched_video_ids)} tracks added to YouTube Music.")
+    print(f"\n✅ Transfer complete. {total_added} tracks attempted to add to YouTube Music.")
 
-    # Second pass for failed tracks
     if failed_tracks:
-        print("\n🔄 Attempting relaxed search for failed tracks...")
-        recovered_video_ids = []
-        unrecovered_tracks = []
-        for i, track in failed_tracks:
-            best_match = find_best_yt_song_relaxed(track)
-            if best_match:
-                print(f"[Retry {i+1}] ✅ Recovered: {track['name']} -> {best_match['title']}")
-                recovered_video_ids.append(best_match['videoId'])
-            else:
-                unrecovered_tracks.append(f"{track['name']} - {', '.join(track['artists'])}")
-
-        if recovered_video_ids:
-            add_tracks_in_batches(ytmusic, playlist_id, recovered_video_ids)
-            print(f"\n✅ {len(recovered_video_ids)} additional tracks added after relaxed search.")
-
-        print(f"\n❌ {len(unrecovered_tracks)} tracks still failed to transfer.")
-        if unrecovered_tracks:
-            print("Still failed tracks:")
-            for name in unrecovered_tracks:
-                print(f"  - {name}")
+        print(f"\n❌ {len(failed_tracks)} tracks failed to transfer.")
+        print("Still failed tracks:")
+        for track in failed_tracks:
+            print(f"  - {track['name']} - {', '.join(track['artists'])}")
 
     actual_count = get_ytmusic_playlist_track_count(ytmusic, playlist_id)
     print(f"\n🎵 Playlist now contains {actual_count} tracks on YouTube Music.")

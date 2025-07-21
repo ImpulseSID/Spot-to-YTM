@@ -9,6 +9,8 @@ Easily transfer your Spotify playlists to YouTube Music with high accuracy. This
 - Authenticates with Spotify and YouTube Music
 - Fetches all tracks from a Spotify playlist
 - Matches tracks on YouTube Music using fuzzy matching
+- **Transfers tracks one by one for reliability**
+- Uses a relaxed search if strict matching fails, and reports relaxed matches in the output
 - Creates a new playlist on YouTube Music and adds matched tracks
 - Reports tracks that could not be matched
 
@@ -114,10 +116,19 @@ python transfer.py
 
 You will be asked for your Spotify playlist URL/ID, and for the YouTube Music playlist name and description (optional). The script will migrate your playlist and report any tracks that could not be matched.
 
+**How matching works:**
+
+- Each track is searched on YouTube Music using a strict fuzzy match.
+- If strict matching fails, a relaxed search is attempted.
+- Relaxed matches are indicated in the output as `🟡 Relaxed match`.
+- Tracks that cannot be matched are reported at the end.
+
 ---
 
 ## Notes
 
+- Tracks are transferred **one by one** for reliability; batch transfer is not used.
 - Fuzzy matching is used to find the best possible match for each track.
+- If a track cannot be found with strict matching, a relaxed search is attempted and reported.
 - Some tracks may not be found or matched accurately due to naming or availability differences.
 - Your credentials and browser headers are required for authentication.
